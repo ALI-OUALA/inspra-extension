@@ -1,0 +1,25 @@
+{
+  "name": "inspra-extension",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Open-source Chrome extension for turning web inspiration into reusable AI-agent-ready design skills.",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @inspra/extension",
+    "build": "npm run build -w @inspra/extension",
+    "typecheck": "npm run typecheck -ws --if-present",
+    "release:zip": "npm run build && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-extension.ps1"
+  },
+  "keywords": [
+    "chrome-extension",
+    "manifest-v3",
+    "ai",
+    "design",
+    "inspiration"
+  ],
+  "license": "MIT"
+}

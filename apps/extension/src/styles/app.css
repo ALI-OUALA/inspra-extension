@@ -1,0 +1,58 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color: #101314;
+  background: #f8faf9;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 360px;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+.inspra-panel {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.94), rgba(248,250,249,.96)),
+    url("/brand/inspra-data-field.jpg");
+  background-position: center top;
+  background-size: cover;
+  background-attachment: fixed;
+}
+
+.signal-grid {
+  background-image:
+    linear-gradient(rgba(12, 77, 90, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(12, 77, 90, 0.08) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+.setup-option {
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.setup-option:hover {
+  transform: translateY(-1px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .setup-option {
+    transition: none;
+  }
+
+  .setup-option:hover {
+    transform: none;
+  }
+}

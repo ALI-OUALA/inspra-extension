@@ -1,0 +1,10 @@
+node_modules
+dist
+.output
+.wxt
+.env
+.env.local
+*.log
+Thumbs.db
+release
+*.zip

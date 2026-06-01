@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["chrome"],
+    "paths": {
+      "@inspra/core": ["../../packages/core/src"],
+      "@inspra/brand": ["../../packages/brand/src"]
+    }
+  },
+  "include": ["entrypoints", "src", "wxt.config.ts", ".wxt/types/**/*.d.ts"]
+}
