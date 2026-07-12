@@ -1,32 +1,36 @@
 # Inspra Extension
 
-Inspra Extension is a local-first Chrome MV3 extension for turning web inspiration into reusable AI-agent-ready design skills.
+A local-first Chrome MV3 extension that captures visual references from the web and turns them into reusable, AI-agent-ready design skills.
 
-It captures visible references, extracts design signals, and generates prompts that describe taste without cloning source websites.
+> Inspra describes the design signals behind a reference. It is built to support original work, not clone source websites.
 
-Public repository: extension source only. Website, database migrations, and hosted backend code live outside this repo.
+## At a glance
 
-## What Is Included
+| Area | Implementation |
+| --- | --- |
+| Extension | WXT + Chrome MV3 |
+| Interface | React, TypeScript, Tailwind CSS |
+| Storage | `chrome.storage.local` |
+| Providers | OpenAI-compatible APIs, Ollama, LM Studio, local fallback |
+| Privacy | Captures remain local unless the user explicitly generates or submits |
 
-- Chrome MV3 extension built with WXT, React, TypeScript, and Tailwind.
-- Local Inspiration Basket using `chrome.storage.local`.
+## What is included
+
+- Inspect-style capture workflow for visible web references.
+- Local Inspiration Basket backed by `chrome.storage.local`.
+- Design-signal extraction and reusable prompt generation.
 - Provider settings for local fallback, OpenAI-compatible endpoints, Ollama, and LM Studio.
-- Feedback submission through a configurable HTTPS API endpoint. Feedback payloads exclude captured page URLs, profile state, captured HTML, and provider keys.
-- Release workflow that builds and attaches the unpacked extension ZIP to GitHub releases.
+- Configurable HTTPS feedback endpoint with a privacy-limited payload.
+- Release workflow that builds and attaches an unpacked extension ZIP to GitHub releases.
 
-## What Is Not Included
+## Privacy model
 
-- Landing website source.
-- Database server code.
-- Vercel, Neon, or deployment secrets.
-- Built extension output.
-- Local Playwright traces, videos, or screenshots.
+Captures stay local by default. Reference context leaves the browser only when the user explicitly:
 
-## Privacy And Security
+1. clicks **Generate Skill** with a configured provider, or
+2. submits release feedback.
 
-Captures stay local by default. Reference context leaves the browser only when the user explicitly clicks **Generate Skill** with a configured provider, or submits release feedback.
-
-The extension never connects directly to Neon/Postgres. Feedback goes through `WXT_FEEDBACK_API_URL`, which should point to a server-side API that owns `DATABASE_URL`.
+The extension does not send captured page URLs, profile state, captured HTML, or provider keys in feedback payloads. It also never connects directly to Neon or PostgreSQL; feedback is routed through a server-side API.
 
 ## Development
 
@@ -35,9 +39,9 @@ npm install
 npm run dev
 ```
 
-Load the generated WXT directory in Chrome:
+Load the generated directory as an unpacked Chrome extension:
 
-```txt
+```text
 apps/extension/.output/chrome-mv3
 ```
 
@@ -48,21 +52,21 @@ npm run typecheck
 npm run build
 ```
 
-## Package Release ZIP
+## Build a release ZIP
 
 ```bash
 npm run release:zip
 ```
 
-The ZIP is written to:
+Output:
 
-```txt
+```text
 release/inspra-extension-v0.1.0.zip
 ```
 
 ## Environment
 
-Copy `apps/extension/.env.example` when you need release overrides:
+Copy `apps/extension/.env.example` when release overrides are needed:
 
 ```env
 WXT_FEEDBACK_API_URL="https://inspra.dev/api/feedback"
@@ -70,3 +74,13 @@ WXT_CHATGPT_SIGN_IN_URL="https://chatgpt.com/"
 ```
 
 Do not commit real secrets.
+
+## Repository scope
+
+This public repository contains the extension source. It intentionally excludes:
+
+- landing website source
+- database server code and migrations
+- Vercel, Neon, or deployment secrets
+- generated extension output
+- local Playwright traces, videos, and screenshots
