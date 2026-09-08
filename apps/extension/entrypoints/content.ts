@@ -143,10 +143,19 @@ function onKeyDown(event: KeyboardEvent) {
   if (event.key === "Escape") stopCapture();
 }
 
+function generateId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (c) =>
+    (Number(c) ^ (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (Number(c) / 4)))).toString(16)
+  );
+}
+
 function buildCapture(element: Element): InspirationCapture {
   const rect = element.getBoundingClientRect();
   return {
-    id: crypto.randomUUID(),
+    id: generateId(),
     createdAt: new Date().toISOString(),
     sourceUrl: location.href,
     pageTitle: document.title,
@@ -366,7 +375,7 @@ function promptButtonStyle(background: string, color: string) {
 
 function buildExperienceCapture(signals: string[]): InspirationCapture {
   return {
-    id: crypto.randomUUID(),
+    id: generateId(),
     createdAt: new Date().toISOString(),
     sourceUrl: location.href,
     pageTitle: document.title,
