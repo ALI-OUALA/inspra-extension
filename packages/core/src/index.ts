@@ -80,7 +80,7 @@ export const defaultProviderSettings: ProviderSettings = {
   mode: "local",
   baseUrl: "https://api.openai.com/v1",
   apiKey: "",
-  model: "gpt-4.1-mini",
+  model: "gpt-4o-mini",
   temperature: 0.35
 };
 
@@ -89,7 +89,7 @@ export const providerPresets: Record<ProviderSettings["mode"], ProviderSettings>
     mode: "openai",
     baseUrl: "https://api.openai.com/v1",
     apiKey: "",
-    model: "gpt-4.1-mini",
+    model: "gpt-4o-mini",
     temperature: 0.35
   },
   ollama: {
@@ -110,7 +110,7 @@ export const providerPresets: Record<ProviderSettings["mode"], ProviderSettings>
     mode: "manual",
     baseUrl: "https://api.openai.com/v1",
     apiKey: "",
-    model: "gpt-4.1-mini",
+    model: "gpt-4o-mini",
     temperature: 0.35
   },
   local: defaultProviderSettings
