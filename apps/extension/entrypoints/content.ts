@@ -241,7 +241,7 @@ function getExperienceSignalsForElement(element: Element) {
 
   candidates.forEach((candidate) => {
     const text = [
-      candidate.className,
+      (candidate.getAttribute("class") || ""),
       Array.from(candidate.attributes).map((attr) => `${attr.name}=${attr.value}`).join(" ")
     ].join(" ").toLowerCase();
     addSignalMatches(text, hints);
@@ -262,7 +262,7 @@ function detectExperienceSignals() {
   const stylesheetHrefs = Array.from(document.styleSheets).map((sheet) => sheet.href ?? "").join(" ").toLowerCase();
   const pageSignals = Array.from(document.querySelectorAll("[class], [data-scroll], [data-scroll-speed], [data-gsap], [data-animation], [data-aos]"))
     .slice(0, 300)
-    .map((element) => [element.className, Array.from(element.attributes).map((attr) => `${attr.name}=${attr.value}`).join(" ")].join(" "))
+    .map((element) => [(element.getAttribute("class") || ""), Array.from(element.attributes).map((attr) => `${attr.name}=${attr.value}`).join(" ")].join(" "))
     .join(" ")
     .toLowerCase();
   addSignalMatches(`${scriptSrc} ${stylesheetHrefs} ${pageSignals}`, hints);
