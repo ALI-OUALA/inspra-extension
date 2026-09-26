@@ -442,7 +442,11 @@ function buildSelector(element: Element) {
 
 function generateId() {
   if (typeof crypto !== "undefined" && crypto.randomUUID) {
-    return crypto.randomUUID();
+    try {
+      return crypto.randomUUID();
+    } catch (e) {
+      // Fallback if randomUUID throws an error (e.g. on insecure origins)
+    }
   }
   return "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (c) => {
     const num = Number(c);
