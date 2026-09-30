@@ -442,14 +442,23 @@ function buildSelector(element: Element) {
 
 function generateId() {
   if (typeof crypto !== "undefined" && crypto.randomUUID) {
-    return crypto.randomUUID();
+    try {
+      return crypto.randomUUID();
+    } catch {
+      // Fallback if randomUUID throws in insecure contexts
+    }
   }
   return "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (c) => {
     const num = Number(c);
-    const randomValue =
-      typeof crypto !== "undefined" && crypto.getRandomValues
-        ? crypto.getRandomValues(new Uint8Array(1))[0]
-        : Math.random() * 256;
+    let randomValue;
+    try {
+      randomValue =
+        typeof crypto !== "undefined" && crypto.getRandomValues
+          ? crypto.getRandomValues(new Uint8Array(1))[0]
+          : Math.random() * 256;
+    } catch {
+      randomValue = Math.random() * 256;
+    }
     return (num ^ (randomValue & (15 >> (num / 4)))).toString(16);
   });
 }
