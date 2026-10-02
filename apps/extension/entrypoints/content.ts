@@ -441,15 +441,29 @@ function buildSelector(element: Element) {
 }
 
 function generateId() {
-  if (typeof crypto !== "undefined" && crypto.randomUUID) {
-    return crypto.randomUUID();
+  let uuid;
+  try {
+    if (typeof crypto !== "undefined" && crypto.randomUUID) {
+      uuid = crypto.randomUUID();
+    }
+  } catch (e) {
+    // Ignore error
   }
+  if (uuid) return uuid;
+
   return "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (c) => {
     const num = Number(c);
-    const randomValue =
-      typeof crypto !== "undefined" && crypto.getRandomValues
-        ? crypto.getRandomValues(new Uint8Array(1))[0]
-        : Math.random() * 256;
+    let randomValue;
+    try {
+      if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+        randomValue = crypto.getRandomValues(new Uint8Array(1))[0];
+      }
+    } catch (e) {
+      // Ignore error
+    }
+    if (randomValue === undefined) {
+      randomValue = Math.floor(Math.random() * 256);
+    }
     return (num ^ (randomValue & (15 >> (num / 4)))).toString(16);
   });
 }
