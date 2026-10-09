@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { InspirationCapture, ProviderSettings, SkillOutput } from "@inspra/core";
 import { buildSkillPack, defaultProviderSettings, providerPresets } from "@inspra/core";
@@ -49,6 +49,11 @@ function SidePanel() {
   const [feedbackEmail, setFeedbackEmail] = useState("");
   const [feedbackBusy, setFeedbackBusy] = useState(false);
 
+  const pendingProviderRef = useRef<ProviderSettings>(provider);
+  const pendingProfileRef = useRef<InspraProfile>(profile);
+  const providerDirtyRef = useRef(false);
+  const profileDirtyRef = useRef(false);
+
   const groupedSignals = useMemo(() => {
     const colors = Array.from(new Set(captures.flatMap((capture) => capture.styleSignals.colors))).slice(0, 10);
     const fonts = Array.from(new Set(captures.flatMap((capture) => capture.styleSignals.fonts))).slice(0, 4);
@@ -64,6 +69,9 @@ function SidePanel() {
     setOnboardingCompleteState(nextOnboarding);
     setProfileState(nextProfile);
     setFeedbackEmail(nextProfile.email ?? "");
+
+    if (!providerDirtyRef.current) pendingProviderRef.current = nextProvider;
+    if (!profileDirtyRef.current) pendingProfileRef.current = nextProfile;
   }
 
   useEffect(() => {
@@ -71,6 +79,23 @@ function SidePanel() {
     const listener = () => void refresh();
     chrome.storage.onChanged.addListener(listener);
     return () => chrome.storage.onChanged.removeListener(listener);
+  }, []);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        if (providerDirtyRef.current) {
+          void setProviderSettings(pendingProviderRef.current);
+          providerDirtyRef.current = false;
+        }
+        if (profileDirtyRef.current) {
+          void setProfile(pendingProfileRef.current);
+          profileDirtyRef.current = false;
+        }
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, []);
 
   async function startCapture() {
@@ -108,7 +133,22 @@ function SidePanel() {
 
   async function saveProvider(next: ProviderSettings) {
     setProvider(next);
+    pendingProviderRef.current = next;
+    providerDirtyRef.current = false;
     await setProviderSettings(next);
+  }
+
+  function handleProviderInputChange(next: ProviderSettings) {
+    pendingProviderRef.current = next;
+    providerDirtyRef.current = true;
+    setProvider(next);
+  }
+
+  async function handleProviderInputBlur() {
+    if (providerDirtyRef.current) {
+      await setProviderSettings(pendingProviderRef.current);
+      providerDirtyRef.current = false;
+    }
   }
 
   async function chooseProvider(mode: ProviderSettings["mode"]) {
@@ -158,6 +198,19 @@ function SidePanel() {
     await setOnboardingComplete(true);
     setOnboardingCompleteState(true);
     setStatus({ tone: "success", text: "Tutorial complete. Capture your first reference when ready." });
+  }
+
+  function handleProfileInputChange(next: InspraProfile) {
+    pendingProfileRef.current = next;
+    profileDirtyRef.current = true;
+    setProfileState(next);
+  }
+
+  async function handleProfileInputBlur() {
+    if (profileDirtyRef.current) {
+      await setProfile(pendingProfileRef.current);
+      profileDirtyRef.current = false;
+    }
   }
 
   async function connectChatGPT() {
@@ -311,11 +364,11 @@ function SidePanel() {
             <button onClick={() => setSetupCompleteState(false)} className="text-xs font-medium text-teal">Change</button>
           </div>
           <div className="mt-3 grid grid-cols-2 gap-2">
-            <input value={provider.model} disabled={provider.mode === "local"} onChange={(event) => saveProvider({ ...provider, model: event.target.value })} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder="Model" />
-            <input value={provider.baseUrl} disabled={provider.mode === "local"} onChange={(event) => saveProvider({ ...provider, baseUrl: event.target.value })} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder="Base URL" />
+            <input value={provider.model} disabled={provider.mode === "local"} onChange={(event) => handleProviderInputChange({ ...provider, model: event.target.value })} onBlur={handleProviderInputBlur} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder="Model" />
+            <input value={provider.baseUrl} disabled={provider.mode === "local"} onChange={(event) => handleProviderInputChange({ ...provider, baseUrl: event.target.value })} onBlur={handleProviderInputBlur} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder="Base URL" />
           </div>
           <div className="mt-2">
-            <input value={provider.apiKey} disabled={provider.mode === "local"} type="password" onChange={(event) => saveProvider({ ...provider, apiKey: event.target.value })} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder={provider.mode === "openai" ? "OpenAI API key" : "API key, if required"} />
+            <input value={provider.apiKey} disabled={provider.mode === "local"} type="password" onChange={(event) => handleProviderInputChange({ ...provider, apiKey: event.target.value })} onBlur={handleProviderInputBlur} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder={provider.mode === "openai" ? "OpenAI API key" : "API key, if required"} />
           </div>
           {provider.mode !== "local" && provider.apiKey ? (
             <button onClick={() => saveProvider({ ...provider, apiKey: "" })} className="mt-2 text-xs font-medium text-ink/55 hover:text-ink">
@@ -340,7 +393,7 @@ function SidePanel() {
             </span>
           </div>
           <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
-            <input value={profile.email ?? ""} onChange={async (event) => { const next = { ...profile, email: event.target.value }; setProfileState(next); await setProfile(next); }} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs" placeholder="Email for feedback replies" />
+            <input value={profile.email ?? ""} onChange={(event) => handleProfileInputChange({ ...profile, email: event.target.value })} onBlur={handleProfileInputBlur} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs" placeholder="Email for feedback replies" />
             <button onClick={connectChatGPT} className="rounded-md bg-ink px-3 py-2 text-xs font-semibold text-white hover:bg-teal">Sign in with ChatGPT</button>
           </div>
         </div>
