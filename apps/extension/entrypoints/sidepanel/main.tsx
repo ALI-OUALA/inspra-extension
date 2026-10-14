@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import type { InspirationCapture, ProviderSettings, SkillOutput } from "@inspra/core";
 import { buildSkillPack, defaultProviderSettings, providerPresets } from "@inspra/core";
@@ -38,16 +38,19 @@ const feedbackOptions: Array<{ kind: FeedbackKind; label: string }> = [
 function SidePanel() {
   const [captures, setCaptures] = useState<InspirationCapture[]>([]);
   const [provider, setProvider] = useState<ProviderSettings>(defaultProviderSettings);
+  const pendingProviderRef = useRef<ProviderSettings>(defaultProviderSettings);
   const [output, setOutput] = useState<SkillOutput>();
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<Notice | undefined>();
   const [setupComplete, setSetupCompleteState] = useState(false);
   const [onboardingComplete, setOnboardingCompleteState] = useState(false);
   const [profile, setProfileState] = useState<InspraProfile>({});
+  const pendingProfileRef = useRef<InspraProfile>({});
   const [feedbackKind, setFeedbackKind] = useState<FeedbackKind>("bug");
   const [feedbackMessage, setFeedbackMessage] = useState("");
   const [feedbackEmail, setFeedbackEmail] = useState("");
   const [feedbackBusy, setFeedbackBusy] = useState(false);
+  const isDirtyRef = useRef(false);
 
   const groupedSignals = useMemo(() => {
     const colors = Array.from(new Set(captures.flatMap((capture) => capture.styleSignals.colors))).slice(0, 10);
@@ -58,19 +61,42 @@ function SidePanel() {
   async function refresh() {
     const [nextCaptures, nextProvider, nextOutput, nextSetup, nextOnboarding, nextProfile] = await Promise.all([getCaptures(), getProviderSettings(), getLastOutput(), getSetupComplete(), getOnboardingComplete(), getProfile()]);
     setCaptures(nextCaptures);
-    setProvider(nextProvider);
+    if (!isDirtyRef.current) {
+      setProvider(nextProvider);
+      pendingProviderRef.current = nextProvider;
+      setProfileState(nextProfile);
+      pendingProfileRef.current = nextProfile;
+      setFeedbackEmail(nextProfile.email ?? "");
+    }
     setOutput(nextOutput);
     setSetupCompleteState(nextSetup);
     setOnboardingCompleteState(nextOnboarding);
-    setProfileState(nextProfile);
-    setFeedbackEmail(nextProfile.email ?? "");
+  }
+
+  async function flushStorage() {
+    if (isDirtyRef.current) {
+      await setProviderSettings(pendingProviderRef.current);
+      await setProfile(pendingProfileRef.current);
+      isDirtyRef.current = false;
+    }
   }
 
   useEffect(() => {
     void refresh();
     const listener = () => void refresh();
     chrome.storage.onChanged.addListener(listener);
-    return () => chrome.storage.onChanged.removeListener(listener);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        void flushStorage();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+
+    return () => {
+      chrome.storage.onChanged.removeListener(listener);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
   }, []);
 
   async function startCapture() {
@@ -108,6 +134,7 @@ function SidePanel() {
 
   async function saveProvider(next: ProviderSettings) {
     setProvider(next);
+    pendingProviderRef.current = next;
     await setProviderSettings(next);
   }
 
@@ -311,11 +338,11 @@ function SidePanel() {
             <button onClick={() => setSetupCompleteState(false)} className="text-xs font-medium text-teal">Change</button>
           </div>
           <div className="mt-3 grid grid-cols-2 gap-2">
-            <input value={provider.model} disabled={provider.mode === "local"} onChange={(event) => saveProvider({ ...provider, model: event.target.value })} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder="Model" />
-            <input value={provider.baseUrl} disabled={provider.mode === "local"} onChange={(event) => saveProvider({ ...provider, baseUrl: event.target.value })} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder="Base URL" />
+            <input value={provider.model} disabled={provider.mode === "local"} onChange={(event) => { isDirtyRef.current = true; const next = { ...provider, model: event.target.value }; pendingProviderRef.current = next; setProvider(next); }} onBlur={flushStorage} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder="Model" />
+            <input value={provider.baseUrl} disabled={provider.mode === "local"} onChange={(event) => { isDirtyRef.current = true; const next = { ...provider, baseUrl: event.target.value }; pendingProviderRef.current = next; setProvider(next); }} onBlur={flushStorage} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder="Base URL" />
           </div>
           <div className="mt-2">
-            <input value={provider.apiKey} disabled={provider.mode === "local"} type="password" onChange={(event) => saveProvider({ ...provider, apiKey: event.target.value })} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder={provider.mode === "openai" ? "OpenAI API key" : "API key, if required"} />
+            <input value={provider.apiKey} disabled={provider.mode === "local"} type="password" onChange={(event) => { isDirtyRef.current = true; const next = { ...provider, apiKey: event.target.value }; pendingProviderRef.current = next; setProvider(next); }} onBlur={flushStorage} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder={provider.mode === "openai" ? "OpenAI API key" : "API key, if required"} />
           </div>
           {provider.mode !== "local" && provider.apiKey ? (
             <button onClick={() => saveProvider({ ...provider, apiKey: "" })} className="mt-2 text-xs font-medium text-ink/55 hover:text-ink">
@@ -340,7 +367,7 @@ function SidePanel() {
             </span>
           </div>
           <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
-            <input value={profile.email ?? ""} onChange={async (event) => { const next = { ...profile, email: event.target.value }; setProfileState(next); await setProfile(next); }} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs" placeholder="Email for feedback replies" />
+            <input value={profile.email ?? ""} onChange={(event) => { isDirtyRef.current = true; const next = { ...profile, email: event.target.value }; pendingProfileRef.current = next; setProfileState(next); }} onBlur={flushStorage} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs" placeholder="Email for feedback replies" />
             <button onClick={connectChatGPT} className="rounded-md bg-ink px-3 py-2 text-xs font-semibold text-white hover:bg-teal">Sign in with ChatGPT</button>
           </div>
         </div>
