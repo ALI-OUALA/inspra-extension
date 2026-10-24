@@ -441,13 +441,13 @@ function buildSelector(element: Element) {
 }
 
 function generateId() {
-  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
   }
   return "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (c) => {
     const num = Number(c);
     const randomValue =
-      typeof crypto !== "undefined" && crypto.getRandomValues
+      typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function"
         ? crypto.getRandomValues(new Uint8Array(1))[0]
         : Math.random() * 256;
     return (num ^ (randomValue & (15 >> (num / 4)))).toString(16);
