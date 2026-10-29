@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { InspirationCapture, ProviderSettings, SkillOutput } from "@inspra/core";
 import { buildSkillPack, defaultProviderSettings, providerPresets } from "@inspra/core";
@@ -49,6 +49,12 @@ function SidePanel() {
   const [feedbackEmail, setFeedbackEmail] = useState("");
   const [feedbackBusy, setFeedbackBusy] = useState(false);
 
+  const providerRef = useRef<ProviderSettings>(defaultProviderSettings);
+  const isProviderDirtyRef = useRef(false);
+  const profileRef = useRef<InspraProfile>({});
+  const isProfileDirtyRef = useRef(false);
+  const isFeedbackEmailDirtyRef = useRef(false);
+
   const groupedSignals = useMemo(() => {
     const colors = Array.from(new Set(captures.flatMap((capture) => capture.styleSignals.colors))).slice(0, 10);
     const fonts = Array.from(new Set(captures.flatMap((capture) => capture.styleSignals.fonts))).slice(0, 4);
@@ -58,19 +64,39 @@ function SidePanel() {
   async function refresh() {
     const [nextCaptures, nextProvider, nextOutput, nextSetup, nextOnboarding, nextProfile] = await Promise.all([getCaptures(), getProviderSettings(), getLastOutput(), getSetupComplete(), getOnboardingComplete(), getProfile()]);
     setCaptures(nextCaptures);
-    setProvider(nextProvider);
+    if (!isProviderDirtyRef.current) {
+      providerRef.current = nextProvider;
+      setProvider(nextProvider);
+    }
     setOutput(nextOutput);
     setSetupCompleteState(nextSetup);
     setOnboardingCompleteState(nextOnboarding);
-    setProfileState(nextProfile);
-    setFeedbackEmail(nextProfile.email ?? "");
+    if (!isProfileDirtyRef.current) {
+      profileRef.current = nextProfile;
+      setProfileState(nextProfile);
+    }
+    if (!isFeedbackEmailDirtyRef.current) {
+      setFeedbackEmail(nextProfile.email ?? "");
+    }
   }
 
   useEffect(() => {
     void refresh();
     const listener = () => void refresh();
     chrome.storage.onChanged.addListener(listener);
-    return () => chrome.storage.onChanged.removeListener(listener);
+
+    const visibilityListener = () => {
+      if (document.visibilityState === "hidden") {
+        void flushProvider();
+        void flushProfile();
+      }
+    };
+    document.addEventListener("visibilitychange", visibilityListener);
+
+    return () => {
+      chrome.storage.onChanged.removeListener(listener);
+      document.removeEventListener("visibilitychange", visibilityListener);
+    };
   }, []);
 
   async function startCapture() {
@@ -106,7 +132,35 @@ function SidePanel() {
     });
   }
 
+  function handleProviderChange(next: ProviderSettings) {
+    providerRef.current = next;
+    isProviderDirtyRef.current = true;
+    setProvider(next);
+  }
+
+  async function flushProvider() {
+    if (isProviderDirtyRef.current) {
+      isProviderDirtyRef.current = false;
+      await setProviderSettings(providerRef.current);
+    }
+  }
+
+  function handleProfileChange(next: InspraProfile) {
+    profileRef.current = next;
+    isProfileDirtyRef.current = true;
+    setProfileState(next);
+  }
+
+  async function flushProfile() {
+    if (isProfileDirtyRef.current) {
+      isProfileDirtyRef.current = false;
+      await setProfile(profileRef.current);
+    }
+  }
+
   async function saveProvider(next: ProviderSettings) {
+    providerRef.current = next;
+    isProviderDirtyRef.current = false;
     setProvider(next);
     await setProviderSettings(next);
   }
@@ -311,11 +365,11 @@ function SidePanel() {
             <button onClick={() => setSetupCompleteState(false)} className="text-xs font-medium text-teal">Change</button>
           </div>
           <div className="mt-3 grid grid-cols-2 gap-2">
-            <input value={provider.model} disabled={provider.mode === "local"} onChange={(event) => saveProvider({ ...provider, model: event.target.value })} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder="Model" />
-            <input value={provider.baseUrl} disabled={provider.mode === "local"} onChange={(event) => saveProvider({ ...provider, baseUrl: event.target.value })} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder="Base URL" />
+            <input value={provider.model} disabled={provider.mode === "local"} onChange={(event) => handleProviderChange({ ...provider, model: event.target.value })} onBlur={() => flushProvider()} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder="Model" />
+            <input value={provider.baseUrl} disabled={provider.mode === "local"} onChange={(event) => handleProviderChange({ ...provider, baseUrl: event.target.value })} onBlur={() => flushProvider()} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder="Base URL" />
           </div>
           <div className="mt-2">
-            <input value={provider.apiKey} disabled={provider.mode === "local"} type="password" onChange={(event) => saveProvider({ ...provider, apiKey: event.target.value })} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder={provider.mode === "openai" ? "OpenAI API key" : "API key, if required"} />
+            <input value={provider.apiKey} disabled={provider.mode === "local"} type="password" onChange={(event) => handleProviderChange({ ...provider, apiKey: event.target.value })} onBlur={() => flushProvider()} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder={provider.mode === "openai" ? "OpenAI API key" : "API key, if required"} />
           </div>
           {provider.mode !== "local" && provider.apiKey ? (
             <button onClick={() => saveProvider({ ...provider, apiKey: "" })} className="mt-2 text-xs font-medium text-ink/55 hover:text-ink">
@@ -340,7 +394,7 @@ function SidePanel() {
             </span>
           </div>
           <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
-            <input value={profile.email ?? ""} onChange={async (event) => { const next = { ...profile, email: event.target.value }; setProfileState(next); await setProfile(next); }} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs" placeholder="Email for feedback replies" />
+            <input value={profile.email ?? ""} onChange={(event) => handleProfileChange({ ...profile, email: event.target.value })} onBlur={() => flushProfile()} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs" placeholder="Email for feedback replies" />
             <button onClick={connectChatGPT} className="rounded-md bg-ink px-3 py-2 text-xs font-semibold text-white hover:bg-teal">Sign in with ChatGPT</button>
           </div>
         </div>
@@ -385,7 +439,7 @@ function SidePanel() {
           </div>
           <textarea value={feedbackMessage} onChange={(event) => setFeedbackMessage(event.target.value)} rows={4} className="mt-3 w-full resize-none rounded-md border border-black/10 px-3 py-2 text-xs leading-5" placeholder="What broke, felt confusing, or should be improved before release?" />
           <div className="mt-2 grid grid-cols-[1fr_auto] gap-2">
-            <input value={feedbackEmail} onChange={(event) => setFeedbackEmail(event.target.value)} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs" placeholder="Email, optional" />
+            <input value={feedbackEmail} onChange={(event) => { isFeedbackEmailDirtyRef.current = true; setFeedbackEmail(event.target.value); }} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs" placeholder="Email, optional" />
             <button disabled={feedbackBusy} onClick={sendFeedback} className="rounded-md bg-teal px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">
               {feedbackBusy ? "Sending" : "Send"}
             </button>
