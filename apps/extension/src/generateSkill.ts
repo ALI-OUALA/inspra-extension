@@ -26,17 +26,31 @@ export async function generateSkill(
     throw new Error("Capture at least one reference before generating a skill.");
   }
 
-  if (provider.mode === "local" || !provider.apiKey.trim()) {
+  if (provider.mode === "local") {
     return createFallbackSkill(captures);
   }
 
-  const endpoint = `${provider.baseUrl.replace(/\/$/, "")}/chat/completions`;
-  const response = await fetch(endpoint, {
+  const endpointUrl = new URL(`${provider.baseUrl.replace(/\/$/, "")}/chat/completions`);
+
+  if (endpointUrl.protocol === "http:" && !["localhost", "127.0.0.1"].includes(endpointUrl.hostname)) {
+    throw new Error("Insecure endpoint: remote providers must use HTTPS. Plain HTTP is only allowed for localhost.");
+  }
+
+  if (provider.mode === "openai" && !provider.apiKey.trim()) {
+    throw new Error("OpenAI requires an API key.");
+  }
+
+  const headers: Record<string, string> = {
+    "content-type": "application/json"
+  };
+
+  if (provider.apiKey.trim()) {
+    headers["authorization"] = `Bearer ${provider.apiKey}`;
+  }
+
+  const response = await fetch(endpointUrl.toString(), {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${provider.apiKey}`
-    },
+    headers,
     body: JSON.stringify({
       model: provider.model,
       temperature: provider.temperature,
