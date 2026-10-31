@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { InspirationCapture, ProviderSettings, SkillOutput } from "@inspra/core";
 import { buildSkillPack, defaultProviderSettings, providerPresets } from "@inspra/core";
@@ -49,6 +49,9 @@ function SidePanel() {
   const [feedbackEmail, setFeedbackEmail] = useState("");
   const [feedbackBusy, setFeedbackBusy] = useState(false);
 
+  const pendingProviderRef = useRef<ProviderSettings>(provider);
+  const isProviderDirtyRef = useRef(false);
+
   const groupedSignals = useMemo(() => {
     const colors = Array.from(new Set(captures.flatMap((capture) => capture.styleSignals.colors))).slice(0, 10);
     const fonts = Array.from(new Set(captures.flatMap((capture) => capture.styleSignals.fonts))).slice(0, 4);
@@ -70,7 +73,20 @@ function SidePanel() {
     void refresh();
     const listener = () => void refresh();
     chrome.storage.onChanged.addListener(listener);
-    return () => chrome.storage.onChanged.removeListener(listener);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden" && isProviderDirtyRef.current) {
+        const snapshot = pendingProviderRef.current;
+        isProviderDirtyRef.current = false;
+        void setProviderSettings(snapshot);
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      chrome.storage.onChanged.removeListener(listener);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
   }, []);
 
   async function startCapture() {
@@ -106,14 +122,26 @@ function SidePanel() {
     });
   }
 
-  async function saveProvider(next: ProviderSettings) {
+  function handleProviderChange(next: ProviderSettings) {
     setProvider(next);
-    await setProviderSettings(next);
+    pendingProviderRef.current = next;
+    isProviderDirtyRef.current = true;
+  }
+
+  async function handleProviderBlur() {
+    if (isProviderDirtyRef.current) {
+      const snapshot = pendingProviderRef.current;
+      isProviderDirtyRef.current = false;
+      await setProviderSettings(snapshot);
+    }
   }
 
   async function chooseProvider(mode: ProviderSettings["mode"]) {
     const preset = providerPresets[mode];
-    await saveProvider(preset);
+    setProvider(preset);
+    pendingProviderRef.current = preset;
+    isProviderDirtyRef.current = false;
+    await setProviderSettings(preset);
     await setSetupComplete(true);
     setSetupCompleteState(true);
     setStatus({ tone: "success", text: mode === "local" ? "Local mode ready. Capture references, then copy output into Codex or ChatGPT." : `${providerOptions.find((option) => option.mode === mode)?.title} selected.` });
@@ -311,14 +339,14 @@ function SidePanel() {
             <button onClick={() => setSetupCompleteState(false)} className="text-xs font-medium text-teal">Change</button>
           </div>
           <div className="mt-3 grid grid-cols-2 gap-2">
-            <input value={provider.model} disabled={provider.mode === "local"} onChange={(event) => saveProvider({ ...provider, model: event.target.value })} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder="Model" />
-            <input value={provider.baseUrl} disabled={provider.mode === "local"} onChange={(event) => saveProvider({ ...provider, baseUrl: event.target.value })} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder="Base URL" />
+            <input value={provider.model} disabled={provider.mode === "local"} onChange={(event) => handleProviderChange({ ...provider, model: event.target.value })} onBlur={handleProviderBlur} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder="Model" />
+            <input value={provider.baseUrl} disabled={provider.mode === "local"} onChange={(event) => handleProviderChange({ ...provider, baseUrl: event.target.value })} onBlur={handleProviderBlur} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder="Base URL" />
           </div>
           <div className="mt-2">
-            <input value={provider.apiKey} disabled={provider.mode === "local"} type="password" onChange={(event) => saveProvider({ ...provider, apiKey: event.target.value })} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder={provider.mode === "openai" ? "OpenAI API key" : "API key, if required"} />
+            <input value={provider.apiKey} disabled={provider.mode === "local"} type="password" onChange={(event) => handleProviderChange({ ...provider, apiKey: event.target.value })} onBlur={handleProviderBlur} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder={provider.mode === "openai" ? "OpenAI API key" : "API key, if required"} />
           </div>
           {provider.mode !== "local" && provider.apiKey ? (
-            <button onClick={() => saveProvider({ ...provider, apiKey: "" })} className="mt-2 text-xs font-medium text-ink/55 hover:text-ink">
+            <button onClick={() => { handleProviderChange({ ...provider, apiKey: "" }); void handleProviderBlur(); }} className="mt-2 text-xs font-medium text-ink/55 hover:text-ink">
               Delete saved API key
             </button>
           ) : null}
