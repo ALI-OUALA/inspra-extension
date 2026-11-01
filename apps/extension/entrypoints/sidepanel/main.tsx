@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { InspirationCapture, ProviderSettings, SkillOutput } from "@inspra/core";
 import { buildSkillPack, defaultProviderSettings, providerPresets } from "@inspra/core";
@@ -38,15 +38,23 @@ const feedbackOptions: Array<{ kind: FeedbackKind; label: string }> = [
 function SidePanel() {
   const [captures, setCaptures] = useState<InspirationCapture[]>([]);
   const [provider, setProvider] = useState<ProviderSettings>(defaultProviderSettings);
+  const pendingProviderRef = useRef<ProviderSettings>(defaultProviderSettings);
+  const isProviderDirtyRef = useRef(false);
+
   const [output, setOutput] = useState<SkillOutput>();
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<Notice | undefined>();
   const [setupComplete, setSetupCompleteState] = useState(false);
   const [onboardingComplete, setOnboardingCompleteState] = useState(false);
   const [profile, setProfileState] = useState<InspraProfile>({});
+  const pendingProfileRef = useRef<InspraProfile>({});
+  const isProfileDirtyRef = useRef(false);
+
   const [feedbackKind, setFeedbackKind] = useState<FeedbackKind>("bug");
   const [feedbackMessage, setFeedbackMessage] = useState("");
   const [feedbackEmail, setFeedbackEmail] = useState("");
+  const pendingFeedbackEmailRef = useRef("");
+  const isFeedbackEmailDirtyRef = useRef(false);
   const [feedbackBusy, setFeedbackBusy] = useState(false);
 
   const groupedSignals = useMemo(() => {
@@ -58,12 +66,18 @@ function SidePanel() {
   async function refresh() {
     const [nextCaptures, nextProvider, nextOutput, nextSetup, nextOnboarding, nextProfile] = await Promise.all([getCaptures(), getProviderSettings(), getLastOutput(), getSetupComplete(), getOnboardingComplete(), getProfile()]);
     setCaptures(nextCaptures);
-    setProvider(nextProvider);
+    if (!isProviderDirtyRef.current) {
+      setProvider(nextProvider);
+      pendingProviderRef.current = nextProvider;
+    }
     setOutput(nextOutput);
     setSetupCompleteState(nextSetup);
     setOnboardingCompleteState(nextOnboarding);
-    setProfileState(nextProfile);
-    setFeedbackEmail(nextProfile.email ?? "");
+    if (!isProfileDirtyRef.current) {
+      setProfileState(nextProfile);
+      pendingProfileRef.current = nextProfile;
+      setFeedbackEmail(nextProfile.email ?? "");
+    }
   }
 
   useEffect(() => {
@@ -72,6 +86,31 @@ function SidePanel() {
     chrome.storage.onChanged.addListener(listener);
     return () => chrome.storage.onChanged.removeListener(listener);
   }, []);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        if (isProviderDirtyRef.current) {
+          const snapshot = pendingProviderRef.current;
+          isProviderDirtyRef.current = false;
+          void setProviderSettings(snapshot);
+        }
+        if (isProfileDirtyRef.current) {
+          const snapshot = pendingProfileRef.current;
+          isProfileDirtyRef.current = false;
+          void setProfile(snapshot);
+        }
+        if (isFeedbackEmailDirtyRef.current) {
+          const snapshot = pendingFeedbackEmailRef.current;
+          isFeedbackEmailDirtyRef.current = false;
+          const nextProfile = { ...profile, email: snapshot };
+          void setProfile(nextProfile);
+        }
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [profile]);
 
   async function startCapture() {
     setBusy(true);
@@ -106,7 +145,23 @@ function SidePanel() {
     });
   }
 
+  function handleProviderChange(next: ProviderSettings) {
+    setProvider(next);
+    pendingProviderRef.current = next;
+    isProviderDirtyRef.current = true;
+  }
+
+  async function flushProvider() {
+    if (isProviderDirtyRef.current) {
+      const snapshot = pendingProviderRef.current;
+      isProviderDirtyRef.current = false;
+      await setProviderSettings(snapshot);
+    }
+  }
+
   async function saveProvider(next: ProviderSettings) {
+    isProviderDirtyRef.current = false;
+    pendingProviderRef.current = next;
     setProvider(next);
     await setProviderSettings(next);
   }
@@ -160,10 +215,47 @@ function SidePanel() {
     setStatus({ tone: "success", text: "Tutorial complete. Capture your first reference when ready." });
   }
 
+  function handleProfileChange(next: InspraProfile) {
+    setProfileState(next);
+    pendingProfileRef.current = next;
+    isProfileDirtyRef.current = true;
+    setFeedbackEmail(next.email ?? "");
+    pendingFeedbackEmailRef.current = next.email ?? "";
+  }
+
+  async function flushProfile() {
+    if (isProfileDirtyRef.current) {
+      const snapshot = pendingProfileRef.current;
+      isProfileDirtyRef.current = false;
+      await setProfile(snapshot);
+    }
+  }
+
+  function handleFeedbackEmailChange(email: string) {
+    setFeedbackEmail(email);
+    pendingFeedbackEmailRef.current = email;
+    isFeedbackEmailDirtyRef.current = true;
+    const nextProfile = { ...profile, email };
+    setProfileState(nextProfile);
+    pendingProfileRef.current = nextProfile;
+    isProfileDirtyRef.current = true;
+  }
+
+  async function flushFeedbackEmail() {
+    if (isFeedbackEmailDirtyRef.current) {
+      const snapshot = pendingFeedbackEmailRef.current;
+      isFeedbackEmailDirtyRef.current = false;
+      const nextProfile = { ...profile, email: snapshot };
+      await setProfile(nextProfile);
+    }
+  }
+
   async function connectChatGPT() {
     const nextProfile = { ...profile, chatgptConnected: true, connectedAt: new Date().toISOString() };
-    await setProfile(nextProfile);
+    isProfileDirtyRef.current = false;
+    pendingProfileRef.current = nextProfile;
     setProfileState(nextProfile);
+    await setProfile(nextProfile);
     await chrome.tabs.create({ url: import.meta.env.WXT_CHATGPT_SIGN_IN_URL || "https://chatgpt.com/" });
     setStatus({ tone: "info", text: "ChatGPT opened. After signing in, copy generated skills there or into Codex." });
   }
@@ -311,11 +403,11 @@ function SidePanel() {
             <button onClick={() => setSetupCompleteState(false)} className="text-xs font-medium text-teal">Change</button>
           </div>
           <div className="mt-3 grid grid-cols-2 gap-2">
-            <input value={provider.model} disabled={provider.mode === "local"} onChange={(event) => saveProvider({ ...provider, model: event.target.value })} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder="Model" />
-            <input value={provider.baseUrl} disabled={provider.mode === "local"} onChange={(event) => saveProvider({ ...provider, baseUrl: event.target.value })} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder="Base URL" />
+            <input value={provider.model} disabled={provider.mode === "local"} onChange={(event) => handleProviderChange({ ...provider, model: event.target.value })} onBlur={flushProvider} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder="Model" />
+            <input value={provider.baseUrl} disabled={provider.mode === "local"} onChange={(event) => handleProviderChange({ ...provider, baseUrl: event.target.value })} onBlur={flushProvider} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder="Base URL" />
           </div>
           <div className="mt-2">
-            <input value={provider.apiKey} disabled={provider.mode === "local"} type="password" onChange={(event) => saveProvider({ ...provider, apiKey: event.target.value })} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder={provider.mode === "openai" ? "OpenAI API key" : "API key, if required"} />
+            <input value={provider.apiKey} disabled={provider.mode === "local"} type="password" onChange={(event) => handleProviderChange({ ...provider, apiKey: event.target.value })} onBlur={flushProvider} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder={provider.mode === "openai" ? "OpenAI API key" : "API key, if required"} />
           </div>
           {provider.mode !== "local" && provider.apiKey ? (
             <button onClick={() => saveProvider({ ...provider, apiKey: "" })} className="mt-2 text-xs font-medium text-ink/55 hover:text-ink">
@@ -340,7 +432,7 @@ function SidePanel() {
             </span>
           </div>
           <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
-            <input value={profile.email ?? ""} onChange={async (event) => { const next = { ...profile, email: event.target.value }; setProfileState(next); await setProfile(next); }} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs" placeholder="Email for feedback replies" />
+            <input value={profile.email ?? ""} onChange={(event) => handleProfileChange({ ...profile, email: event.target.value })} onBlur={flushProfile} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs" placeholder="Email for feedback replies" />
             <button onClick={connectChatGPT} className="rounded-md bg-ink px-3 py-2 text-xs font-semibold text-white hover:bg-teal">Sign in with ChatGPT</button>
           </div>
         </div>
@@ -385,7 +477,7 @@ function SidePanel() {
           </div>
           <textarea value={feedbackMessage} onChange={(event) => setFeedbackMessage(event.target.value)} rows={4} className="mt-3 w-full resize-none rounded-md border border-black/10 px-3 py-2 text-xs leading-5" placeholder="What broke, felt confusing, or should be improved before release?" />
           <div className="mt-2 grid grid-cols-[1fr_auto] gap-2">
-            <input value={feedbackEmail} onChange={(event) => setFeedbackEmail(event.target.value)} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs" placeholder="Email, optional" />
+            <input value={feedbackEmail} onChange={(event) => handleFeedbackEmailChange(event.target.value)} onBlur={flushFeedbackEmail} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs" placeholder="Email, optional" />
             <button disabled={feedbackBusy} onClick={sendFeedback} className="rounded-md bg-teal px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">
               {feedbackBusy ? "Sending" : "Send"}
             </button>
