@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { InspirationCapture, ProviderSettings, SkillOutput } from "@inspra/core";
 import { buildSkillPack, defaultProviderSettings, providerPresets } from "@inspra/core";
@@ -38,12 +38,16 @@ const feedbackOptions: Array<{ kind: FeedbackKind; label: string }> = [
 function SidePanel() {
   const [captures, setCaptures] = useState<InspirationCapture[]>([]);
   const [provider, setProvider] = useState<ProviderSettings>(defaultProviderSettings);
+  const providerPendingRef = useRef(defaultProviderSettings);
+  const providerDirtyRef = useRef(false);
   const [output, setOutput] = useState<SkillOutput>();
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<Notice | undefined>();
   const [setupComplete, setSetupCompleteState] = useState(false);
   const [onboardingComplete, setOnboardingCompleteState] = useState(false);
   const [profile, setProfileState] = useState<InspraProfile>({});
+  const profilePendingRef = useRef<InspraProfile>({});
+  const profileDirtyRef = useRef(false);
   const [feedbackKind, setFeedbackKind] = useState<FeedbackKind>("bug");
   const [feedbackMessage, setFeedbackMessage] = useState("");
   const [feedbackEmail, setFeedbackEmail] = useState("");
@@ -55,14 +59,36 @@ function SidePanel() {
     return { colors, fonts };
   }, [captures]);
 
+  async function flushProvider() {
+    if (providerDirtyRef.current) {
+      const snap = providerPendingRef.current;
+      providerDirtyRef.current = false;
+      await setProviderSettings(snap);
+    }
+  }
+
+  async function flushProfile() {
+    if (profileDirtyRef.current) {
+      const snap = profilePendingRef.current;
+      profileDirtyRef.current = false;
+      await setProfile(snap);
+    }
+  }
+
   async function refresh() {
     const [nextCaptures, nextProvider, nextOutput, nextSetup, nextOnboarding, nextProfile] = await Promise.all([getCaptures(), getProviderSettings(), getLastOutput(), getSetupComplete(), getOnboardingComplete(), getProfile()]);
     setCaptures(nextCaptures);
-    setProvider(nextProvider);
+    if (!providerDirtyRef.current) {
+      setProvider(nextProvider);
+      providerPendingRef.current = nextProvider;
+    }
     setOutput(nextOutput);
     setSetupCompleteState(nextSetup);
     setOnboardingCompleteState(nextOnboarding);
-    setProfileState(nextProfile);
+    if (!profileDirtyRef.current) {
+      setProfileState(nextProfile);
+      profilePendingRef.current = nextProfile;
+    }
     setFeedbackEmail(nextProfile.email ?? "");
   }
 
@@ -70,7 +96,17 @@ function SidePanel() {
     void refresh();
     const listener = () => void refresh();
     chrome.storage.onChanged.addListener(listener);
-    return () => chrome.storage.onChanged.removeListener(listener);
+    const visibilityListener = () => {
+      if (document.visibilityState === "hidden") {
+        void flushProvider();
+        void flushProfile();
+      }
+    };
+    document.addEventListener("visibilitychange", visibilityListener);
+    return () => {
+      chrome.storage.onChanged.removeListener(listener);
+      document.removeEventListener("visibilitychange", visibilityListener);
+    };
   }, []);
 
   async function startCapture() {
@@ -106,14 +142,16 @@ function SidePanel() {
     });
   }
 
-  async function saveProvider(next: ProviderSettings) {
+  function saveProvider(next: ProviderSettings) {
     setProvider(next);
-    await setProviderSettings(next);
+    providerPendingRef.current = next;
+    providerDirtyRef.current = true;
   }
 
   async function chooseProvider(mode: ProviderSettings["mode"]) {
     const preset = providerPresets[mode];
-    await saveProvider(preset);
+    saveProvider(preset);
+    await flushProvider();
     await setSetupComplete(true);
     setSetupCompleteState(true);
     setStatus({ tone: "success", text: mode === "local" ? "Local mode ready. Capture references, then copy output into Codex or ChatGPT." : `${providerOptions.find((option) => option.mode === mode)?.title} selected.` });
@@ -162,8 +200,10 @@ function SidePanel() {
 
   async function connectChatGPT() {
     const nextProfile = { ...profile, chatgptConnected: true, connectedAt: new Date().toISOString() };
-    await setProfile(nextProfile);
     setProfileState(nextProfile);
+    profilePendingRef.current = nextProfile;
+    profileDirtyRef.current = true;
+    await flushProfile();
     await chrome.tabs.create({ url: import.meta.env.WXT_CHATGPT_SIGN_IN_URL || "https://chatgpt.com/" });
     setStatus({ tone: "info", text: "ChatGPT opened. After signing in, copy generated skills there or into Codex." });
   }
@@ -311,14 +351,14 @@ function SidePanel() {
             <button onClick={() => setSetupCompleteState(false)} className="text-xs font-medium text-teal">Change</button>
           </div>
           <div className="mt-3 grid grid-cols-2 gap-2">
-            <input value={provider.model} disabled={provider.mode === "local"} onChange={(event) => saveProvider({ ...provider, model: event.target.value })} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder="Model" />
-            <input value={provider.baseUrl} disabled={provider.mode === "local"} onChange={(event) => saveProvider({ ...provider, baseUrl: event.target.value })} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder="Base URL" />
+            <input value={provider.model} disabled={provider.mode === "local"} onChange={(event) => saveProvider({ ...provider, model: event.target.value })} onBlur={flushProvider} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder="Model" />
+            <input value={provider.baseUrl} disabled={provider.mode === "local"} onChange={(event) => saveProvider({ ...provider, baseUrl: event.target.value })} onBlur={flushProvider} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder="Base URL" />
           </div>
           <div className="mt-2">
-            <input value={provider.apiKey} disabled={provider.mode === "local"} type="password" onChange={(event) => saveProvider({ ...provider, apiKey: event.target.value })} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder={provider.mode === "openai" ? "OpenAI API key" : "API key, if required"} />
+            <input value={provider.apiKey} disabled={provider.mode === "local"} type="password" onChange={(event) => saveProvider({ ...provider, apiKey: event.target.value })} onBlur={flushProvider} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder={provider.mode === "openai" ? "OpenAI API key" : "API key, if required"} />
           </div>
           {provider.mode !== "local" && provider.apiKey ? (
-            <button onClick={() => saveProvider({ ...provider, apiKey: "" })} className="mt-2 text-xs font-medium text-ink/55 hover:text-ink">
+            <button onClick={async () => { saveProvider({ ...provider, apiKey: "" }); await flushProvider(); }} className="mt-2 text-xs font-medium text-ink/55 hover:text-ink">
               Delete saved API key
             </button>
           ) : null}
@@ -340,7 +380,7 @@ function SidePanel() {
             </span>
           </div>
           <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
-            <input value={profile.email ?? ""} onChange={async (event) => { const next = { ...profile, email: event.target.value }; setProfileState(next); await setProfile(next); }} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs" placeholder="Email for feedback replies" />
+            <input value={profile.email ?? ""} onChange={(event) => { const next = { ...profile, email: event.target.value }; setProfileState(next); profilePendingRef.current = next; profileDirtyRef.current = true; }} onBlur={flushProfile} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs" placeholder="Email for feedback replies" />
             <button onClick={connectChatGPT} className="rounded-md bg-ink px-3 py-2 text-xs font-semibold text-white hover:bg-teal">Sign in with ChatGPT</button>
           </div>
         </div>
