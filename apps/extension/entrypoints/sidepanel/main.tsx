@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { InspirationCapture, ProviderSettings, SkillOutput } from "@inspra/core";
 import { buildSkillPack, defaultProviderSettings, providerPresets } from "@inspra/core";
@@ -49,6 +49,11 @@ function SidePanel() {
   const [feedbackEmail, setFeedbackEmail] = useState("");
   const [feedbackBusy, setFeedbackBusy] = useState(false);
 
+  const providerDirtyRef = useRef(false);
+  const providerPendingRef = useRef<ProviderSettings>(defaultProviderSettings);
+  const profileDirtyRef = useRef(false);
+  const profilePendingRef = useRef<InspraProfile>({});
+
   const groupedSignals = useMemo(() => {
     const colors = Array.from(new Set(captures.flatMap((capture) => capture.styleSignals.colors))).slice(0, 10);
     const fonts = Array.from(new Set(captures.flatMap((capture) => capture.styleSignals.fonts))).slice(0, 4);
@@ -58,19 +63,39 @@ function SidePanel() {
   async function refresh() {
     const [nextCaptures, nextProvider, nextOutput, nextSetup, nextOnboarding, nextProfile] = await Promise.all([getCaptures(), getProviderSettings(), getLastOutput(), getSetupComplete(), getOnboardingComplete(), getProfile()]);
     setCaptures(nextCaptures);
-    setProvider(nextProvider);
     setOutput(nextOutput);
     setSetupCompleteState(nextSetup);
     setOnboardingCompleteState(nextOnboarding);
-    setProfileState(nextProfile);
-    setFeedbackEmail(nextProfile.email ?? "");
+
+    if (!providerDirtyRef.current) {
+      setProvider(nextProvider);
+      providerPendingRef.current = nextProvider;
+    }
+
+    if (!profileDirtyRef.current) {
+      setProfileState(nextProfile);
+      profilePendingRef.current = nextProfile;
+      setFeedbackEmail(nextProfile.email ?? "");
+    }
   }
 
   useEffect(() => {
     void refresh();
     const listener = () => void refresh();
     chrome.storage.onChanged.addListener(listener);
-    return () => chrome.storage.onChanged.removeListener(listener);
+
+    const visibilityListener = () => {
+      if (document.visibilityState === "hidden") {
+        void flushProvider();
+        void flushProfile();
+      }
+    };
+    document.addEventListener("visibilitychange", visibilityListener);
+
+    return () => {
+      chrome.storage.onChanged.removeListener(listener);
+      document.removeEventListener("visibilitychange", visibilityListener);
+    };
   }, []);
 
   async function startCapture() {
@@ -106,7 +131,22 @@ function SidePanel() {
     });
   }
 
+  function handleProviderChange(next: ProviderSettings) {
+    providerDirtyRef.current = true;
+    providerPendingRef.current = next;
+    setProvider(next);
+  }
+
+  async function flushProvider() {
+    if (!providerDirtyRef.current) return;
+    const pending = providerPendingRef.current;
+    providerDirtyRef.current = false;
+    await setProviderSettings(pending);
+  }
+
   async function saveProvider(next: ProviderSettings) {
+    providerDirtyRef.current = false;
+    providerPendingRef.current = next;
     setProvider(next);
     await setProviderSettings(next);
   }
@@ -160,8 +200,23 @@ function SidePanel() {
     setStatus({ tone: "success", text: "Tutorial complete. Capture your first reference when ready." });
   }
 
+  function handleProfileChange(next: InspraProfile) {
+    profileDirtyRef.current = true;
+    profilePendingRef.current = next;
+    setProfileState(next);
+  }
+
+  async function flushProfile() {
+    if (!profileDirtyRef.current) return;
+    const pending = profilePendingRef.current;
+    profileDirtyRef.current = false;
+    await setProfile(pending);
+  }
+
   async function connectChatGPT() {
     const nextProfile = { ...profile, chatgptConnected: true, connectedAt: new Date().toISOString() };
+    profileDirtyRef.current = false;
+    profilePendingRef.current = nextProfile;
     await setProfile(nextProfile);
     setProfileState(nextProfile);
     await chrome.tabs.create({ url: import.meta.env.WXT_CHATGPT_SIGN_IN_URL || "https://chatgpt.com/" });
@@ -311,11 +366,11 @@ function SidePanel() {
             <button onClick={() => setSetupCompleteState(false)} className="text-xs font-medium text-teal">Change</button>
           </div>
           <div className="mt-3 grid grid-cols-2 gap-2">
-            <input value={provider.model} disabled={provider.mode === "local"} onChange={(event) => saveProvider({ ...provider, model: event.target.value })} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder="Model" />
-            <input value={provider.baseUrl} disabled={provider.mode === "local"} onChange={(event) => saveProvider({ ...provider, baseUrl: event.target.value })} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder="Base URL" />
+            <input value={provider.model} disabled={provider.mode === "local"} onChange={(event) => handleProviderChange({ ...provider, model: event.target.value })} onBlur={flushProvider} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder="Model" />
+            <input value={provider.baseUrl} disabled={provider.mode === "local"} onChange={(event) => handleProviderChange({ ...provider, baseUrl: event.target.value })} onBlur={flushProvider} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder="Base URL" />
           </div>
           <div className="mt-2">
-            <input value={provider.apiKey} disabled={provider.mode === "local"} type="password" onChange={(event) => saveProvider({ ...provider, apiKey: event.target.value })} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder={provider.mode === "openai" ? "OpenAI API key" : "API key, if required"} />
+            <input value={provider.apiKey} disabled={provider.mode === "local"} type="password" onChange={(event) => handleProviderChange({ ...provider, apiKey: event.target.value })} onBlur={flushProvider} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs disabled:bg-mist/40 disabled:text-ink/40" placeholder={provider.mode === "openai" ? "OpenAI API key" : "API key, if required"} />
           </div>
           {provider.mode !== "local" && provider.apiKey ? (
             <button onClick={() => saveProvider({ ...provider, apiKey: "" })} className="mt-2 text-xs font-medium text-ink/55 hover:text-ink">
@@ -340,7 +395,7 @@ function SidePanel() {
             </span>
           </div>
           <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
-            <input value={profile.email ?? ""} onChange={async (event) => { const next = { ...profile, email: event.target.value }; setProfileState(next); await setProfile(next); }} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs" placeholder="Email for feedback replies" />
+            <input value={profile.email ?? ""} onChange={(event) => handleProfileChange({ ...profile, email: event.target.value })} onBlur={flushProfile} className="w-full rounded-md border border-black/10 px-3 py-2 text-xs" placeholder="Email for feedback replies" />
             <button onClick={connectChatGPT} className="rounded-md bg-ink px-3 py-2 text-xs font-semibold text-white hover:bg-teal">Sign in with ChatGPT</button>
           </div>
         </div>
